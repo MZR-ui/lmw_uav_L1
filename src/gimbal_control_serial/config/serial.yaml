@@ -1,0 +1,3 @@
+port_name: "/dev/ttyUSB0"
+baud_rate: 115200
+publish_rate: 50

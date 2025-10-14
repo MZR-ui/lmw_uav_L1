@@ -1,0 +1,2 @@
+demo_pkg:gimbal_control_serial:sensing
+-DCATKIN_DEVEL_PREFIX=/home/mzr/lmw_catkin_ws/uav_ws/devel -DCMAKE_INSTALL_PREFIX=/home/mzr/lmw_catkin_ws/uav_ws/install -G Unix Makefiles
