@@ -12,7 +12,7 @@ class GimbalControlNode
 {
 public:
     GimbalControlNode(ros::NodeHandle& nh)
-        : nh_(nh), serial_(port_name_, baud_rate_)
+        : nh_(nh)
     {
         // 1. 读取参数
         nh_.param<std::string>("port_name", port_name_, "/dev/ttyUSB0");
@@ -21,7 +21,8 @@ public:
 
         // 2. 初始化串口
         //serial_ = std::make_shared<GimbalSerial>(port_name_, baud_rate_);
-        if (!serial_.open()) {
+        serial_.reset(new GimbalSerial(port_name_, baud_rate_));
+        if (!serial_->open()) {
             ROS_ERROR("? Failed to open serial port: %s", port_name_.c_str());
             ros::shutdown();
         } else {
@@ -42,7 +43,7 @@ private:
     ros::Subscriber cmd_sub_;
     ros::Publisher raw_tx_pub_;
     ros::Timer timer_;
-    GimbalSerial serial_;
+    std::unique_ptr<GimbalSerial> serial_;   // 延后初始化
     //std::shared_ptr<GimbalSerial> serial_;   // ? 改成智能指针以延后初始化
 
     std::string port_name_;
@@ -63,14 +64,15 @@ private:
     void timerCallback(const ros::TimerEvent&)
     {
         Gcu2GbcPkt_t pkt = {0};
-
+        memset(&pkt, 0, sizeof(pkt)); // 保证清零
+        
         // 填充协议数据
         pkt.sync[0] = 0xA9;
         pkt.sync[1] = 0x5B;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             // 这里简单映射 roll/pitch/yaw 到 uav.angle
-            pkt.uav.valid = 1;
+            pkt.uav.valid = 0;
             pkt.uav.angle[0] = static_cast<int16_t>(last_cmd_.roll * 100);  // deg -> 0.01deg
             pkt.uav.angle[1] = static_cast<int16_t>(last_cmd_.pitch * 100);
             pkt.uav.angle[2] = static_cast<int16_t>(last_cmd_.yaw * 100);
@@ -78,22 +80,27 @@ private:
             // 工作模式/控制模式映射到 gbc[0] 可扩展
             for(int i=0;i<3;i++) {
                 pkt.gbc[i].go_zero = 0;
-                pkt.gbc[i].wk_mode = 1;   // 跟随模式
+                pkt.gbc[i].wk_mode = 0;   // 跟随模式
                 pkt.gbc[i].op_type = 0;   // 角度控制
                 pkt.gbc[i].op_value = pkt.uav.angle[i];
             }
+            //pkt.aux.fl_sens=4;
+            pkt.gbc[0].wk_mode=1;
+            pkt.gbc[1].op_type=2;
+            pkt.gbc[1].wk_mode=1;
+            pkt.gbc[2].op_type=2;
         }
         pkt.uav.angle[0] = 0;
         pkt.uav.angle[1] = 0;
         pkt.uav.angle[2] = 0;
-        pkt.cmd.value=2;
+        pkt.cmd.value=4;
         // 计算CRC
         uint16_t crc = CalculateCrc16(reinterpret_cast<uint8_t*>(&pkt), sizeof(pkt)-2);
-        pkt.crc[0] = crc & 0xFF;
-        pkt.crc[1] = (crc >> 8) & 0xFF;
+        pkt.crc[1] = crc & 0xFF;
+        pkt.crc[0] = (crc >> 8) & 0xFF;
 
         // 发送串口
-        if (!serial_.sendPacket(pkt)) {
+        if (!serial_->sendPacket(pkt)) {
             ROS_WARN("?? Failed to send packet");
         }
 
@@ -104,15 +111,15 @@ private:
         raw_tx_pub_.publish(raw_msg);
         
         // ?修改：增加接收功能
-        Gbc2GcuPkt_t recv_pkt;
-        if (serial_.readPacket(recv_pkt))  // 这个函数你需要在 gimbal_serial.cpp 里实现
-        {
+        //Gbc2GcuPkt_t recv_pkt;
+        //if (serial_.readPacket(recv_pkt))  // 这个函数你需要在 gimbal_serial.cpp 里实现
+        //{
             // 打印接收到的数据
-            ROS_INFO("Recv: roll=%.2f pitch=%.2f yaw=%.2f",
-                     recv_pkt.cam_angle[0] * 0.01,
-                     recv_pkt.cam_angle[1] * 0.01,
-                     recv_pkt.cam_angle[2] * 0.01);
-        }
+            //ROS_INFO("Recv: roll=%.2f pitch=%.2f yaw=%.2f",
+                     //recv_pkt.cam_angle[0] * 0.01,
+                     //recv_pkt.cam_angle[1] * 0.01,
+                     //recv_pkt.cam_angle[2] * 0.01);
+        //}
     }
 };
 
