@@ -99,16 +99,34 @@ private:
         pkt.crc[1] = crc & 0xFF;
         pkt.crc[0] = (crc >> 8) & 0xFF;
 
-        // 发送串口
-        if (!serial_->sendPacket(pkt)) {
-            ROS_WARN("?? Failed to send packet");
+
+        Gbc2GcuPkt_t recv_pkt;
+        bool ok = serial_->sendAndWaitReply(pkt, recv_pkt, 5);  // 5ms 超时
+
+        if (ok) {
+            ROS_INFO("?? Recv OK: cam_angle = %.2f %.2f %.2f",
+                     recv_pkt.cam_angle[0] * 0.01,
+                     recv_pkt.cam_angle[1] * 0.01,
+                     recv_pkt.cam_angle[2] * 0.01);
+        } else {
+            ROS_WARN("?? No response from gimbal");
         }
 
-        // 发布原始数据包
         std_msgs::UInt8MultiArray raw_msg;
         raw_msg.data.resize(sizeof(pkt));
         memcpy(raw_msg.data.data(), &pkt, sizeof(pkt));
         raw_tx_pub_.publish(raw_msg);
+
+        // 发送串口
+        //if (!serial_->sendPacket(pkt)) {
+        //    ROS_WARN("?? Failed to send packet");
+        //}
+
+        // 发布原始数据包
+        //std_msgs::UInt8MultiArray raw_msg;
+        //raw_msg.data.resize(sizeof(pkt));
+        //memcpy(raw_msg.data.data(), &pkt, sizeof(pkt));
+        //raw_tx_pub_.publish(raw_msg);
         
         // ?修改：增加接收功能
         //Gbc2GcuPkt_t recv_pkt;

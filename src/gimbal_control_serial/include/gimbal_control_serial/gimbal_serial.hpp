@@ -7,6 +7,8 @@
 #include <thread>
 #include <mutex>
 #include "gimbal_control_serial/gimbal_protocol.hpp"
+#include <sys/ioctl.h>
+
 
 class GimbalSerial
 {
@@ -20,6 +22,10 @@ public:
 
     bool sendPacket(const gimbal_protocol::Gcu2GbcPkt_t& pkt);
     bool readPacket(gimbal_protocol::Gbc2GcuPkt_t& pkt);
+    
+    bool sendAndWaitReply(const gimbal_protocol::Gcu2GbcPkt_t& tx_pkt,
+                          gimbal_protocol::Gbc2GcuPkt_t& rx_pkt,
+                          int timeout_ms = 100);
 
 private:
     void readThread();
@@ -28,6 +34,7 @@ private:
 private:
     boost::asio::io_service io_;
     boost::asio::serial_port serial_;
+    //serial::Serial serial_;
     std::string port_;
     int baudrate_;
     std::thread read_thread_;

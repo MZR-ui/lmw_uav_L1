@@ -90,16 +90,15 @@ bool GimbalSerial::readPacket(Gbc2GcuPkt_t& pkt)
     return false;
 }
 
-
-
 void GimbalSerial::close()
 {
     running_ = false;
+    if (serial_.is_open())
+        serial_.cancel(), serial_.close();
     if (read_thread_.joinable())
         read_thread_.join();
-    if (serial_.is_open())
-        serial_.close();
 }
+
 
 bool GimbalSerial::isOpen() const
 {
@@ -169,3 +168,86 @@ void GimbalSerial::handleReceivedData(const uint8_t* data, size_t len)
         recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + idx + sizeof(Gbc2GcuPkt_t));
     }
 }
+
+bool GimbalSerial::sendAndWaitReply(const Gcu2GbcPkt_t& tx_pkt,
+                          Gbc2GcuPkt_t& rx_pkt,
+                          int timeout_ms)
+{
+    if (!sendPacket(tx_pkt)) {
+        ROS_WARN("GimbalSerial: failed to send packet");
+        return false;
+    }
+
+    auto start = std::chrono::steady_clock::now();
+    std::vector<uint8_t> recv_buf;
+    recv_buf.reserve(256);
+
+    while (true) {
+        // ---------- 超时判断 ----------
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count() > timeout_ms) {
+            ROS_WARN("GimbalSerial: response timeout");
+            return false;
+        }
+
+        // ---------- 检查可读字节 ----------
+        int bytes_available = 0;
+        int fd = serial_.lowest_layer().native_handle();
+        if (ioctl(fd, FIONREAD, &bytes_available) < 0) {
+            ROS_ERROR("GimbalSerial: ioctl(FIONREAD) failed");
+            return false;
+        }
+
+        if (bytes_available > 0) {
+            std::vector<uint8_t> tmp(bytes_available);
+            boost::system::error_code ec;
+
+            size_t r = serial_.read_some(boost::asio::buffer(tmp), ec);
+            if (ec) {
+                ROS_ERROR("GimbalSerial: read_some error: %s", ec.message().c_str());
+                return false;
+            }
+            recv_buf.insert(recv_buf.end(), tmp.begin(), tmp.begin() + r);
+        }
+
+        // ---------- 查找帧头并校验 ----------
+        for (size_t i = 0; i + 1 < recv_buf.size(); ++i) {
+            if (recv_buf[i] == 0xB5 && recv_buf[i + 1] == 0x9A) {
+                size_t remain = recv_buf.size() - i;
+                if (remain >= sizeof(Gbc2GcuPkt_t)) {
+                    memcpy(&rx_pkt, &recv_buf[i], sizeof(Gbc2GcuPkt_t));
+
+                    uint16_t crc_calc = CalculateCrc16(reinterpret_cast<uint8_t*>(&rx_pkt),
+                                                       sizeof(Gbc2GcuPkt_t) - 2);
+                    uint16_t crc_recv = rx_pkt.crc[0] | (rx_pkt.crc[1] << 8);
+
+                    // --- 打印接收到的数据 ---
+                    std::ostringstream oss;
+                    oss << "Recv data: ";
+                    for (size_t j = 0; j < sizeof(Gbc2GcuPkt_t); ++j) {
+                        oss << std::hex << std::setw(2) << std::setfill('0')
+                            << static_cast<int>(reinterpret_cast<uint8_t*>(&rx_pkt)[j]) << " ";
+                    }
+                    ROS_INFO("%s", oss.str().c_str());
+
+                    // --- 打印 CRC ---
+                    ROS_INFO("CRC calc=0x%04X, CRC recv=0x%04X", crc_calc, crc_recv);
+                    
+                    if (crc_calc == crc_recv) {
+                        return true;  // ? 成功
+                    } else {
+                        ROS_WARN("CRC mismatch (calc=0x%04X, recv=0x%04X)", crc_calc, crc_recv);
+                        return false;
+                    }
+                }
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+
+
+
+
