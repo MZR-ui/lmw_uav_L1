@@ -28,8 +28,6 @@ public:
                           int timeout_ms = 100);
 
 private:
-    void readThread();
-    void handleReceivedData(const uint8_t* data, size_t len);
 
 private:
     boost::asio::io_service io_;
