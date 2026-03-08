@@ -54,6 +54,22 @@ add_dependencies(${PROJECT_NAME}_node
   ${catkin_EXPORTED_TARGETS}
 )
 
+
+# 新节点：mode_manage_node
+add_executable(mode_manage_node
+  src/mode_manage_node.cpp
+)
+
+# 添加依赖（确保消息头文件生成）
+add_dependencies(mode_manage_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+
+target_link_libraries(mode_manage_node
+  ${catkin_LIBRARIES}
+)
+
 ## 链接库
 target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
@@ -74,4 +90,10 @@ install(DIRECTORY include/${PROJECT_NAME}/
 ## 安装 launch 文件
 install(FILES launch/msp_interface.launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+)
+
+
+# 安装两个节点
+install(TARGETS msp_interface_node mode_manage_node
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

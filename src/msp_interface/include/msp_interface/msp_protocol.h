@@ -14,18 +14,23 @@ namespace msp_interface
 /// MSP V2 帧头 (两个字节)
 const uint8_t MSP_V2_HEADER[] = {'$', 'X'};
 
+// 消息类型
+const uint8_t MSP_V2_TYPE_REQUEST = '<';  // 0x3c
+const uint8_t MSP_V2_TYPE_REPLY   = '>';  // 0x3e
+const uint8_t MSP_V2_TYPE_ERROR    = '!';  // 0x21
+
 // ============================================================================
 // 命令 ID 定义 (需要根据实际飞控固件修改)
 // ============================================================================
 
 /// 请求 IMU 传感器数据 (示例值，请查阅飞控源码确认)
-const uint16_t MSP2_SENSOR_IMU = 0x1F00;
+const uint16_t MSP_ATTITUDE = 0x006c;
 
 /// 请求气压计高度 (示例值)
 const uint16_t MSP2_SENSOR_BARO = 0x1F01;
 
 /// 发送遥控通道数据 (示例值)
-const uint16_t MSP2_RC = 0x0B00;
+const uint16_t MSP2_RC = 0x00C8;
 
 // TODO: 根据您的飞控固件添加更多命令 ID
 // 例如 INAV 中的其他传感器命令: MSP2_SENSOR_GPS, MSP2_SENSOR_COMPASS 等

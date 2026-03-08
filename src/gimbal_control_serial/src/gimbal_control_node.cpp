@@ -14,12 +14,12 @@ public:
     GimbalControlNode(ros::NodeHandle& nh)
         : nh_(nh)
     {
-        // 1. ¶ÁÈ¡²ÎÊý
+        // 1. ï¿½ï¿½È¡ï¿½ï¿½ï¿½ï¿½
         nh_.param<std::string>("port_name", port_name_, "/dev/ttyUSB0");
         nh_.param<int>("baud_rate", baud_rate_, 115200);
         nh_.param<double>("publish_rate", publish_rate_, 50.0);
 
-        // 2. ³õÊ¼»¯´®¿Ú
+        // 2. ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         //serial_ = std::make_shared<GimbalSerial>(port_name_, baud_rate_);
         serial_.reset(new GimbalSerial(port_name_, baud_rate_));
         if (!serial_->open()) {
@@ -29,11 +29,11 @@ public:
             ROS_INFO("? Serial port %s opened at %d baud", port_name_.c_str(), baud_rate_);
         }
 
-        // 3. ³õÊ¼»¯»°Ìâ
+        // 3. ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         cmd_sub_ = nh_.subscribe("/gimbal/cmd", 10, &GimbalControlNode::cmdCallback, this);
         raw_tx_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("/gimbal/raw_tx", 10);
 
-        // 4. Æô¶¯¶¨Ê±Æ÷
+        // 4. ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½
         timer_ = nh_.createTimer(ros::Duration(1.0/publish_rate_), &GimbalControlNode::timerCallback, this);
         ROS_INFO("Gimbal control node initialized, sending at %.1f Hz", publish_rate_);
     }
@@ -43,65 +43,65 @@ private:
     ros::Subscriber cmd_sub_;
     ros::Publisher raw_tx_pub_;
     ros::Timer timer_;
-    std::unique_ptr<GimbalSerial> serial_;   // ÑÓºó³õÊ¼»¯
-    //std::shared_ptr<GimbalSerial> serial_;   // ? ¸Ä³ÉÖÇÄÜÖ¸ÕëÒÔÑÓºó³õÊ¼»¯
+    std::unique_ptr<GimbalSerial> serial_;   // ï¿½Óºï¿½ï¿½Ê¼ï¿½ï¿½
+    //std::shared_ptr<GimbalSerial> serial_;   // ? ï¿½Ä³ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½Óºï¿½ï¿½Ê¼ï¿½ï¿½
 
     std::string port_name_;
     int baud_rate_;
     double publish_rate_;
 
     std::mutex mutex_;
-    gimbal_control_serial::GimbalCmd last_cmd_; // ´æ´¢×îÐÂ½ÓÊÕµ½µÄ»°ÌâÊý¾Ý
+    gimbal_control_serial::GimbalCmd last_cmd_; // ï¿½æ´¢ï¿½ï¿½ï¿½Â½ï¿½ï¿½Õµï¿½ï¿½Ä»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
-    // »°Ìâ»Øµ÷
+    // ï¿½ï¿½ï¿½ï¿½Øµï¿½
     void cmdCallback(const gimbal_control_serial::GimbalCmd::ConstPtr& msg)
     {
         std::lock_guard<std::mutex> lock(mutex_);
         last_cmd_ = *msg;
     }
 
-    // ¶¨Ê±Æ÷»Øµ÷
+    // ï¿½ï¿½Ê±ï¿½ï¿½ï¿½Øµï¿½
     void timerCallback(const ros::TimerEvent&)
     {
         Gcu2GbcPkt_t pkt = {0};
-        memset(&pkt, 0, sizeof(pkt)); // ±£Ö¤ÇåÁã
+        memset(&pkt, 0, sizeof(pkt)); // ï¿½ï¿½Ö¤ï¿½ï¿½ï¿½ï¿½
         
-        // Ìî³äÐ­ÒéÊý¾Ý
+        // ï¿½ï¿½ï¿½Ð­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         pkt.sync[0] = 0xA9;
         pkt.sync[1] = 0x5B;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            // ÕâÀï¼òµ¥Ó³Éä roll/pitch/yaw µ½ uav.angle
+            // ï¿½ï¿½ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ roll/pitch/yaw ï¿½ï¿½ uav.angle
             pkt.uav.valid = 0;
             pkt.uav.angle[0] = static_cast<int16_t>(last_cmd_.roll * 100);  // deg -> 0.01deg
             pkt.uav.angle[1] = static_cast<int16_t>(last_cmd_.pitch * 100);
             pkt.uav.angle[2] = static_cast<int16_t>(last_cmd_.yaw * 100);
 
-            // ¹¤×÷Ä£Ê½/¿ØÖÆÄ£Ê½Ó³Éäµ½ gbc[0] ¿ÉÀ©Õ¹
+            // ï¿½ï¿½ï¿½ï¿½Ä£Ê½/ï¿½ï¿½ï¿½ï¿½Ä£Ê½Ó³ï¿½äµ½ gbc[0] ï¿½ï¿½ï¿½ï¿½Õ¹
             for(int i=0;i<3;i++) {
                 pkt.gbc[i].go_zero = 0;
-                pkt.gbc[i].wk_mode = 0;   // ¸úËæÄ£Ê½
-                pkt.gbc[i].op_type = 0;   // ½Ç¶È¿ØÖÆ
+                pkt.gbc[i].wk_mode = 0;   // ï¿½ï¿½ï¿½ï¿½Ä£Ê½
+                pkt.gbc[i].op_type = 0;   // ï¿½Ç¶È¿ï¿½ï¿½ï¿½
                 pkt.gbc[i].op_value = pkt.uav.angle[i];
             }
             //pkt.aux.fl_sens=4;
-            pkt.gbc[0].wk_mode=1;
-            pkt.gbc[1].op_type=2;
-            pkt.gbc[1].wk_mode=1;
-            pkt.gbc[2].op_type=2;
+            //pkt.gbc[0].wk_mode=1;
+            //pkt.gbc[1].op_type=2;
+            //pkt.gbc[1].wk_mode=1;
+            //pkt.gbc[2].op_type=2;
         }
         pkt.uav.angle[0] = 0;
         pkt.uav.angle[1] = 0;
         pkt.uav.angle[2] = 0;
         pkt.cmd.value=4;
-        // ¼ÆËãCRC
+        // ï¿½ï¿½ï¿½ï¿½CRC
         uint16_t crc = CalculateCrc16(reinterpret_cast<uint8_t*>(&pkt), sizeof(pkt)-2);
         pkt.crc[1] = crc & 0xFF;
         pkt.crc[0] = (crc >> 8) & 0xFF;
 
 
         Gbc2GcuPkt_t recv_pkt;
-        bool ok = serial_->sendAndWaitReply(pkt, recv_pkt, 5);  // 5ms ³¬Ê±
+        bool ok = serial_->sendAndWaitReply(pkt, recv_pkt, 5);  // 5ms ï¿½ï¿½Ê±
 
         if (ok) {
             ROS_INFO("?? Recv OK: cam_angle = %.2f %.2f %.2f",
@@ -117,22 +117,22 @@ private:
         memcpy(raw_msg.data.data(), &pkt, sizeof(pkt));
         raw_tx_pub_.publish(raw_msg);
 
-        // ·¢ËÍ´®¿Ú
+        // ï¿½ï¿½ï¿½Í´ï¿½ï¿½ï¿½
         //if (!serial_->sendPacket(pkt)) {
         //    ROS_WARN("?? Failed to send packet");
         //}
 
-        // ·¢²¼Ô­Ê¼Êý¾Ý°ü
+        // ï¿½ï¿½ï¿½ï¿½Ô­Ê¼ï¿½ï¿½ï¿½Ý°ï¿½
         //std_msgs::UInt8MultiArray raw_msg;
         //raw_msg.data.resize(sizeof(pkt));
         //memcpy(raw_msg.data.data(), &pkt, sizeof(pkt));
         //raw_tx_pub_.publish(raw_msg);
         
-        // ?ÐÞ¸Ä£ºÔö¼Ó½ÓÊÕ¹¦ÄÜ
+        // ?ï¿½Þ¸Ä£ï¿½ï¿½ï¿½ï¿½Ó½ï¿½ï¿½Õ¹ï¿½ï¿½ï¿½
         //Gbc2GcuPkt_t recv_pkt;
-        //if (serial_.readPacket(recv_pkt))  // Õâ¸öº¯ÊýÄãÐèÒªÔÚ gimbal_serial.cpp ÀïÊµÏÖ
+        //if (serial_.readPacket(recv_pkt))  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ gimbal_serial.cpp ï¿½ï¿½Êµï¿½ï¿½
         //{
-            // ´òÓ¡½ÓÊÕµ½µÄÊý¾Ý
+            // ï¿½ï¿½Ó¡ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             //ROS_INFO("Recv: roll=%.2f pitch=%.2f yaw=%.2f",
                      //recv_pkt.cam_angle[0] * 0.01,
                      //recv_pkt.cam_angle[1] * 0.01,

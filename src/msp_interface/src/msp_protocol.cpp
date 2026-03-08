@@ -1,3 +1,4 @@
+#include <cstdio>  // 在文件开头添加
 #include "msp_interface/msp_protocol.h"
 
 namespace msp_interface
@@ -34,6 +35,7 @@ std::vector<uint8_t> packMspV2Request(uint16_t cmd, const uint8_t* payload, size
     std::vector<uint8_t> frame;
     frame.push_back('$');
     frame.push_back('X');
+    frame.push_back('<');
     frame.push_back(0x00);
     frame.push_back(static_cast<uint8_t>(cmd & 0xFF));
     frame.push_back(static_cast<uint8_t>((cmd >> 8) & 0xFF));
@@ -43,11 +45,13 @@ std::vector<uint8_t> packMspV2Request(uint16_t cmd, const uint8_t* payload, size
         frame.insert(frame.end(), payload, payload + payload_len);
 
     uint16_t crc = 0;
-    for (size_t i = 2; i < frame.size(); ++i)
-        crc = crc16_ccitt(crc, frame[i]);
+    for (size_t i = 3; i < payload_len + 8; ++i)
+    {
+        //printf("CRC calc: i=%zu, byte=0x%02x\n", i, frame[i]);  // 添加打印
+        crc = crc8_dvb_s2(crc, frame[i]);
+    }
 
     frame.push_back(static_cast<uint8_t>(crc & 0xFF));
-    frame.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
     return frame;
 }
 

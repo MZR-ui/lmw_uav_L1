@@ -17,14 +17,6 @@
 namespace msp_interface
 {
 
-/**
- * @brief MSP V2 接口主节点类
- * 
- * 负责：
- * - 通过串口与飞控通信（MSP V2 协议）
- * - 异步接收并解析飞控发来的传感器数据（IMU、高度等），发布到 /msp_sensor 话题
- * - 订阅 /msp_channel 话题，将控制通道数据发送给飞控
- */
 class MspInterfaceNode
 {
 public:
@@ -36,6 +28,26 @@ public:
         // 1. 读取 ROS 参数
         nh_priv_.param<std::string>("port", port_, "/dev/ttyUSB0");
         nh_priv_.param<int>("baud", baud_, 115200);
+        nh_priv_.param<double>("loop_rate", loop_rate_, 1000.0);
+        nh_priv_.param<double>("sensor_rate", sensor_rate_, 50.0);      // 传感器请求频率 (Hz)
+        nh_priv_.param<bool>("simulate_channels", simulate_channels_, false); // 是否模拟通道数据
+        nh_priv_.param<double>("channel_rate", channel_rate_, 50.0);     // 模拟通道发送频率 (Hz)
+
+        if (loop_rate_ > 0 && sensor_rate_ > 0) {
+            sensor_interval_ = static_cast<int>(loop_rate_ / sensor_rate_);
+            if (sensor_interval_ < 1) sensor_interval_ = 1;
+        } else {
+            sensor_interval_ = 1;
+        }
+        if (loop_rate_ > 0 && channel_rate_ > 0 && simulate_channels_) {
+            channel_interval_ = static_cast<int>(loop_rate_ / channel_rate_);
+            if (channel_interval_ < 1) channel_interval_ = 1;
+        } else {
+            channel_interval_ = 0;  // 不发送
+        }
+
+        ROS_INFO("Loop rate: %.1f Hz, sensor interval: %d, channel interval: %d",
+                 loop_rate_, sensor_interval_, channel_interval_);
 
         // 2. 初始化发布者和订阅者
         sensor_pub_ = nh_.advertise<msp_interface::MspSensor>("msp_sensor", 10);
@@ -45,23 +57,24 @@ public:
         serial_.reset(new SerialDriver());
         if (!serial_->open(port_, baud_))
         {
-            ROS_FATAL("无法打开串口 %s，请检查权限和设备是否存在", port_.c_str());
+            ROS_FATAL("Failed to open serial port %s, please check permissions and device existence", port_.c_str());
             ros::shutdown();
             return;
         }
-        ROS_INFO("串口 %s 已打开，波特率 %d", port_.c_str(), baud_);
+        ROS_INFO("Serial port %s opened (baudrate %d)", port_.c_str(), baud_);
 
         // 4. 启动异步读取线程，将收到的字节流交给解析器
         serial_->startAsyncRead(std::bind(&MspInterfaceNode::onSerialData, this,
                                           std::placeholders::_1,
                                           std::placeholders::_2));
 
-        // 5. 创建定时器，定期向飞控请求传感器数据（例如 50Hz）
-        //    MSP 协议中，飞控通常不会主动推送数据，需要主机发送请求命令
-        request_timer_ = nh_.createTimer(ros::Duration(0.02),   // 50ms = 20Hz
-                                         &MspInterfaceNode::requestTimerCallback, this);
+        // 5. 创建主循环定时器
+        double loop_period = 1.0 / loop_rate_;
+        loop_timer_ = nh_.createTimer(ros::Duration(loop_period),
+                                      &MspInterfaceNode::loopCallback, this);
+        ROS_INFO("Main loop timer started at %.1f Hz", loop_rate_);
+        ROS_INFO("MSP interface node started successfully");
 
-        ROS_INFO("MSP 接口节点已启动，请求频率 20Hz");
     }
 
     ~MspInterfaceNode()
@@ -69,132 +82,187 @@ public:
         running_ = false;
         if (serial_)
             serial_->close();
-        if (read_thread_.joinable())
-            read_thread_.join();
     }
 
 private:
+    
+    // void handleAttitude(const std::vector<uint8_t>& payload);
+
     /**
      * @brief 串口数据接收回调（在串口驱动线程中执行）
-     * @param data 字节数组指针
-     * @param len  数据长度
      */
     void onSerialData(const uint8_t* data, size_t len)
     {
+        //ROS_INFO_THROTTLE(5.0, "Receive data：");
+        //printf("Receive data: ptr=%p, len=%zu\n", data, len);
+        // 拼接前16字节的十六进制字符串（防止单条日志过长）
+
+        // std::stringstream ss;
+        // ss << "Receive data: len=" << len << ", data (first 16 bytes): ";
+        // for (size_t i = 0; i < len && i < 16; ++i) {
+        //     ss << std::hex << std::setw(2) << std::setfill('0') << (int)data[i] << " ";
+        // }
+        // if (len > 16) ss << "...";
+        // ROS_INFO("%s", ss.str().c_str());
+
         std::lock_guard<std::mutex> lock(parser_mutex_);
         for (size_t i = 0; i < len; ++i)
         {
             std::vector<uint8_t> packet;
             if (parser_.parseByte(data[i], packet))
             {
-                // 成功解析出一个完整 MSP V2 数据包
-                // 注意：此处假设飞控返回的是传感器数据（命令 ID 由您根据实际固件定义）
-                // 您需要根据实际命令 ID 判断，并正确解析 packet 中的数据
-                handleSensorPacket(packet);
+                uint16_t cmd = parser_.getLastCommand();  // 获取命令 ID
+                handleSensorPacket(cmd, packet);
             }
         }
     }
 
     /**
      * @brief 处理解析出的完整传感器数据包
-     * @param payload  MSP V2 数据包中的有效载荷（不包含帧头、命令、长度和 CRC）
      */
-    void handleSensorPacket(const std::vector<uint8_t>& payload)
+
+     void handleSensorPacket(uint16_t cmd, const std::vector<uint8_t>& payload) {
+        switch(cmd) {
+            /*Receive info*/
+            case MSP_ATTITUDE: handleAttitude(payload); break;
+            case MSP2_RC: break;
+            // case MSP_ALTITUDE: handleAltitude(payload); break;
+            /*Receive Ack*/
+            default: ROS_WARN_THROTTLE(1.0, "Unknown command: %d", cmd); break;
+        }
+    }
+
+    void handleAttitude(const std::vector<uint8_t>& payload)
     {
-        // 根据您的飞控固件（如 INAV）解析 payload 中的数据
-        // 以下是一个示例，假设 IMU 数据按顺序排列：gyro(3*float), acc(3*float), quat(4*float), altitude(float)
-        // 实际数据格式和命令 ID 请参考飞控源码（如 msp_protocol_v2.h）
-        if (payload.size() < 4*8)   // 至少需要 8 个 float = 32 字节
+        if (payload.size() != 6)  // 三个 int16_t = 6 字节
         {
-            ROS_WARN_THROTTLE(1.0, "接收到的传感器数据长度不足：%zu 字节", payload.size());
+            ROS_WARN_THROTTLE(1.2, "Invalid attitude packet size: %zu bytes (expected 6)", payload.size());
             return;
         }
 
+        // 解析三个 int16_t (小端序)
+        int16_t roll_raw  = static_cast<int16_t>(payload[0] | (payload[1] << 8));
+        int16_t pitch_raw = static_cast<int16_t>(payload[2] | (payload[3] << 8));
+        int16_t yaw_raw   = static_cast<int16_t>(payload[4] | (payload[5] << 8));
+
+        // 转换为度 (原始单位为 0.1 度)
+        float roll  = roll_raw  / 10.0f;
+        float pitch = pitch_raw / 10.0f;
+        float yaw   = yaw_raw   / 1.0f;
+
+        // 临时填充到 MspSensor 消息（注意语义不符）
         msp_interface::MspSensor msg;
         msg.header.stamp = ros::Time::now();
+        msg.orientation_x = roll;
+        msg.orientation_y = pitch;
+        msg.orientation_z = yaw;
+        msg.orientation_w = 1.0;  // 占位
 
-        // 将字节数组转换为 float 数组（假设飞控使用小端序）
-        const float* data = reinterpret_cast<const float*>(payload.data());
-        msg.gyro_x = data[0];
-        msg.gyro_y = data[1];
-        msg.gyro_z = data[2];
-        msg.acc_x  = data[3];
-        msg.acc_y  = data[4];
-        msg.acc_z  = data[5];
-        msg.orientation_x = data[6];
-        msg.orientation_y = data[7];
-        msg.orientation_z = data[8];
-        msg.orientation_w = data[9];
-        msg.altitude = data[10];   // 假设第 11 个 float 是高度
-
+        // 其余字段置零（可选）
+        msg.gyro_x = msg.gyro_y = msg.gyro_z = 0;
+        msg.acc_x = msg.acc_y = msg.acc_z = 0;
+        msg.altitude = 0;
         sensor_pub_.publish(msg);
-        ROS_DEBUG("发布传感器数据：gyro(%.2f,%.2f,%.2f) alt=%.2f",
-                  msg.gyro_x, msg.gyro_y, msg.gyro_z, msg.altitude);
+        ROS_INFO_THROTTLE(1, "Published attitude: roll=%.1f pitch=%.1f yaw=%.1f", roll, pitch, yaw);
+    }
+
+    void loopCallback(const ros::TimerEvent&)
+    {
+        counter_++;  // 全局计数器递增
+
+        // 发送传感器请求（取模控制）
+        if (sensor_interval_ > 0 && (counter_ % sensor_interval_ == 0))
+        {
+            sendRequest(MSP_ATTITUDE); 
+        }
+
+        // 发送模拟通道数据（如果启用）
+        if (simulate_channels_ && channel_interval_ > 0 && (counter_ % channel_interval_ == 0))
+        {
+            std::vector<uint16_t> channels(10, 1500);  // 模拟 10 个通道中位值
+            sendChannels(channels);
+        }
     }
 
     /**
      * @brief 定时器回调，向飞控发送传感器数据请求
      */
-    void requestTimerCallback(const ros::TimerEvent&)
+    void sendRequest(uint16_t cmd)
     {
-        // 需要根据您的飞控固件确定正确的请求命令 ID
-        // 例如 INAV 中请求 IMU 数据的命令可能是 MSP2_SENSOR_IMU = 0x1F00
-        // 请在 msp_protocol.h 中定义这些常量
-        uint16_t cmd = MSP2_SENSOR_IMU;   // 需要您根据实际固件定义
         std::vector<uint8_t> request = packMspV2Request(cmd, nullptr, 0);
         if (!request.empty())
         {
+            std::lock_guard<std::mutex> lock(serial_write_mutex_);
             if (!serial_->write(request.data(), request.size()))
             {
-                ROS_ERROR_THROTTLE(1.0, "发送传感器请求失败");
+                ROS_ERROR_THROTTLE(1.0, "Failed to send request (cmd=%u)", cmd);
             }
         }
     }
 
     /**
      * @brief 订阅话题 /msp_channel 的回调，将控制数据发送给飞控
-     * @param msg 控制通道消息
      */
     void channelCallback(const msp_interface::MspChannel::ConstPtr& msg)
     {
-        // 将 ROS 消息转换为 MSP V2 负载
-        // 通常每个通道占 2 字节（uint16_t），按小端序排列
+        // ROS_INFO_THROTTLE(1.0, "Channel callback triggered (rate %.1f Hz)", channel_rate_);
+        // ROS_INFO("Channel callback triggered (rate %.1f Hz)", channel_rate_);
+        sendChannels(msg->channels);
+    }
+
+    /**
+     * @brief 将通道数据打包并通过串口发送给飞控
+     * @param channels 通道值数组
+     */
+    void sendChannels(const std::vector<uint16_t>& channels)
+    {
         std::vector<uint8_t> payload;
-        for (uint16_t ch : msg->channels)
+        for (uint16_t ch : channels)
         {
             payload.push_back(ch & 0xFF);
             payload.push_back((ch >> 8) & 0xFF);
         }
 
-        // 打包成 MSP V2 请求帧，命令 ID 通常为 MSP2_RC
-        uint16_t cmd = MSP2_RC;   // 需要您根据实际固件定义
+        uint16_t cmd = MSP2_RC;  // 请确保宏定义正确
         std::vector<uint8_t> request = packMspV2Request(cmd, payload.data(), payload.size());
 
         if (!request.empty())
         {
+            std::lock_guard<std::mutex> lock(serial_write_mutex_);
             if (!serial_->write(request.data(), request.size()))
             {
-                ROS_ERROR("发送控制通道数据失败");
+                ROS_ERROR("Failed to send channel data");
             }
         }
     }
 
 private:
-    ros::NodeHandle nh_;               // 公共节点句柄
-    ros::NodeHandle nh_priv_;           // 私有节点句柄
-    std::string port_;                  // 串口设备
-    int baud_;                          // 波特率
-    std::unique_ptr<SerialDriver> serial_;   // 串口驱动对象
-    std::thread read_thread_;            // 读取线程（由 SerialDriver 内部管理，此处不需要直接使用）
-    std::atomic<bool> running_;          // 运行标志
+    ros::NodeHandle nh_;
+    ros::NodeHandle nh_priv_;
+    std::string port_;
+    int baud_;
+    double loop_rate_;
+    double sensor_rate_;                // 传感器请求频率 (Hz)
+    bool simulate_channels_;            // 是否模拟通道数据
+    double channel_rate_;               // 模拟通道发送频率 (Hz)
 
-    // MSP 协议解析器
+    int sensor_interval_;    // 传感器发送间隔（tick 数）
+    int channel_interval_;   // 模拟通道发送间隔
+    int counter_;            // 全局 tick 计数器
+
+    std::unique_ptr<SerialDriver> serial_;
+    std::atomic<bool> running_;
+
     MspV2Parser parser_;
-    std::mutex parser_mutex_;            // 保护 parser_ 的互斥锁（因在多个线程中调用）
+    std::mutex parser_mutex_;
+    std::mutex serial_write_mutex_;    // 保护串口写入（多线程安全）
 
-    ros::Publisher sensor_pub_;          // 传感器数据发布者
-    ros::Subscriber channel_sub_;        // 控制通道订阅者
-    ros::Timer request_timer_;           // 传感器请求定时器
+    ros::Publisher sensor_pub_;
+    ros::Subscriber channel_sub_;
+    ros::Timer request_timer_;
+    ros::Timer channel_sim_timer_;      // 模拟通道定时器
+
+    ros::Timer loop_timer_;             // 主循环定时器
 };
 
 } // namespace msp_interface
@@ -207,8 +275,7 @@ int main(int argc, char** argv)
 
     msp_interface::MspInterfaceNode node(nh, nh_priv);
 
-    // 多线程 spinner 允许回调函数（如定时器、订阅回调）在 separate 线程中执行
-    ros::AsyncSpinner spinner(2);   // 使用 2 个线程
+    ros::AsyncSpinner spinner(2);
     spinner.start();
     ros::waitForShutdown();
 
