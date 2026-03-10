@@ -5,6 +5,11 @@
         各子 launch 文件位于各自功能包的 launch 目录中。
     -->
 
+    <!-- 直接启动 remote_info 节点 -->
+    <node name="remote_info" pkg="remote_info" type="remote_info_node" output="screen">
+        <rosparam command="load" file="$(find remote_info)/config/remote_config.yaml" />
+    </node>
+
     <!-- 包含 MSP 接口节点（飞控通信） -->
     <include file="$(find msp_interface)/launch/msp_interface.launch">
         <!-- 如需覆盖默认参数，可在此添加 arg 传递，例如：
@@ -29,5 +34,6 @@
 
     <!-- 可以额外添加全局参数服务器参数 -->
     <!-- <param name="use_sim_time" value="false" /> -->
+    <include file="$(find task_manager)/launch/task_manager.launch" />
 
 </launch>

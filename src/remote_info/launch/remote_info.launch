@@ -1,9 +1,5 @@
 <launch>
-    <!-- 加载遥控器配置参数 -->
-    <rosparam command="load" file="$(find remote_info)/config/remote_config.yaml" />
-
-    <!-- 启动节点 -->
     <node name="remote_info" pkg="remote_info" type="remote_info_node" output="screen">
-        <!-- 参数已通过 rosparam 加载，无需重复指定，但也可以留空 -->
+        <rosparam command="load" file="$(find remote_info)/config/remote_config.yaml" />
     </node>
 </launch>

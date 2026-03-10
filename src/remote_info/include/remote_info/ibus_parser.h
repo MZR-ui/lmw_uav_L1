@@ -7,6 +7,10 @@
 namespace remote_info
 {
 
+// 定义常量（可放在类定义中）
+static const uint8_t IBUS_LENGTH = 0x20;
+static const uint8_t IBUS_COMMAND40 = 0x40;
+
 /**
  * @brief IBUS 协议解析器
  * 
@@ -41,7 +45,7 @@ public:
 private:
     State state_;
     uint8_t buffer_[32];        // 完整帧缓冲区
-    size_t index_;               // 当前缓冲区索引
+    uint8_t index_;               // 当前缓冲区索引
     uint16_t checksum_calc_;     // 计算中的校验和
 };
 

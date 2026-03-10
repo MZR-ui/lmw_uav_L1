@@ -15,75 +15,75 @@ void IbusParser::reset()
 {
     state_ = WAIT_LENGTH;
     index_ = 0;
-    checksum_calc_ = 0;
+    // buffer_ 内容无需清空，后续会被覆盖
 }
 
 bool IbusParser::parseByte(uint8_t byte, std::vector<uint16_t>& out_channels)
 {
+    // 逐字节打印（非常详细，调试完后可注释）
+
     switch (state_)
     {
     case WAIT_LENGTH:
-        if (byte == 0x20)  // 帧头长度字节
+        if (byte == IBUS_LENGTH)
         {
             buffer_[0] = byte;
             index_ = 1;
-            checksum_calc_ = byte;
             state_ = WAIT_COMMAND;
+            // printf("WAIT_LENGTH\n");
         }
         break;
 
     case WAIT_COMMAND:
-        if (byte == 0x40)  // 命令码
+        if (byte == IBUS_COMMAND40)
         {
             buffer_[1] = byte;
             index_ = 2;
-            checksum_calc_ += byte;
             state_ = WAIT_DATA;
+            // printf("WAIT_COMMAND\n");
         }
         else
         {
-            reset();  // 命令码错误，重新同步
+            // printf("WAIT_COMMAND_warng\n");  // 保留原拼写
+            reset();
         }
         break;
 
     case WAIT_DATA:
+        // printf("WAIT_DATA: buffer_[%d]=0x%02x\n", index_, byte);
         buffer_[index_] = byte;
-        checksum_calc_ += byte;
         index_++;
-        
-        if (index_ == 32)  // 已接收完32字节
+        if (index_ == 32)
         {
-            state_ = WAIT_CHECKSUM;
-        }
-        break;
-
-    case WAIT_CHECKSUM:
-    {
-        // 校验和 = 0xFFFF - (前30字节和)
-        uint16_t expected_checksum = 0xFFFF - (checksum_calc_ - buffer_[30] - buffer_[31]);
-        uint16_t received_checksum = (buffer_[30] | (buffer_[31] << 8));
-        
-        if (expected_checksum == received_checksum)
-        {
-            // 校验通过，解析14个通道（小端序）
-            out_channels.clear();
+            uint16_t checksum_cal = 0xFFFF - buffer_[0] - buffer_[1];
             for (int i = 0; i < 14; i++)
             {
-                uint16_t ch = buffer_[2 + i*2] | (buffer_[2 + i*2 + 1] << 8);
-                out_channels.push_back(ch);
+                checksum_cal = checksum_cal - buffer_[2 + i*2] - buffer_[2 + i*2 + 1];
             }
-            reset();
-            return true;
-        }
-        else
-        {
-            ROS_DEBUG_THROTTLE(1.0, "IBUS checksum mismatch: calc=%04x, recv=%04x", 
-                               expected_checksum, received_checksum);
-            reset();
-            return false;
+            uint16_t checksum_ibus = buffer_[31] << 8 | buffer_[30];
+
+            if (checksum_cal == checksum_ibus)
+            {
+                out_channels.clear();
+                for (int i = 0; i < 14; i++)
+                {
+                    uint16_t ch = buffer_[2 + i*2] | (buffer_[2 + i*2 + 1] << 8);
+                    out_channels.push_back(ch);
+                }
+                // printf("success!\r\n");
+                reset();
+                return true;
+            }
+            else
+            {
+                // 原为 ROS_DEBUG_THROTTLE，改为简单打印（每次校验失败都打印，可能很多）
+                printf("IBUS checksum mismatch: calc=0x%04x, recv=0x%04x\n",
+                       checksum_cal, checksum_ibus);
+                reset();
+                return false;
+            }
         }
         break;
-    }
 
     default:
         reset();

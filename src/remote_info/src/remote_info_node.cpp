@@ -24,13 +24,13 @@ public:
         , running_(true)
     {
         // 1. 读取 ROS 参数
-        nh_priv_.param<std::string>("port", port_, "/dev/ttyUSB1");
+        nh_priv_.param<std::string>("port", port_, "/dev/ttyUSB0");
         nh_priv_.param<int>("baud", baud_, 115200);  // IBUS 固定 115200
-        nh_priv_.param<double>("send_rate", send_rate_, 10.0);  // 发送频率，0表示禁用
+        nh_priv_.param<double>("send_rate", send_rate_, 0);  // 发送频率，0表示禁用
 
 
         // 2. 初始化发布者
-        remote_pub_ = nh_.advertise<remote_info::Remote>("remote_data", 10);
+        remote_pub_ = nh_.advertise<remote_info::Remote>("remote_order", 10);
 
         // 3. 创建串口驱动对象并打开串口
         serial_.reset(new SerialDriver());
@@ -69,7 +69,7 @@ private:
     void onSerialData(const uint8_t* data, size_t len)
     {
         // 可选：打印原始数据用于调试
-        // ROS_INFO_THROTTLE(1.0, "Remote RX: %zu bytes", len);
+        // ROS_INFO( "Remote RX: %zu bytes", len);
 
         std::lock_guard<std::mutex> lock(parser_mutex_);
         for (size_t i = 0; i < len; ++i)
@@ -82,9 +82,9 @@ private:
                 msg.header.stamp = ros::Time::now();
                 msg.channels = channels;
                 remote_pub_.publish(msg);
-                
-                ROS_DEBUG_THROTTLE(1.0, "Published remote: CH1=%d, CH2=%d, CH3=%d", 
-                                   channels[0], channels[1], channels[2]);
+                // printf("success!\r\n");
+                // ROS_INFO("Published remote: CH1=%d, CH2=%d, CH3=%d", 
+                                //    channels[0], channels[1], channels[2]);
             }
         }
     }
@@ -96,9 +96,6 @@ private:
         // ROS_INFO("Timer callback triggered at %.3f", ros::Time::now().toSec());  // 每触发一次都打印
         std::vector<uint8_t> test_frame = {
             0x20, 0x40,
-            0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05,  // CH1-4
-            0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05,  // CH5-8
-            0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05, 0xDC, 0x05,  // CH9-12
             0xDC, 0x05, 0xDC, 0x05,                           // CH13-14
             0x00, 0x00  // 校验和占位，需要计算
         };
@@ -106,8 +103,8 @@ private:
         uint16_t sum = 0;
         for (int i = 0; i < 30; i++) sum += test_frame[i];
         uint16_t checksum = 0xFFFF - sum;
-        test_frame[30] = checksum & 0xFF;
-        test_frame[31] = (checksum >> 8) & 0xFF;
+        test_frame[6] = checksum & 0xFF;
+        test_frame[7] = (checksum >> 8) & 0xFF;
 
         // printf("Sending frame (%zu bytes): ", test_frame.size());
         // for (auto b : test_frame) printf("%02x ", b);
