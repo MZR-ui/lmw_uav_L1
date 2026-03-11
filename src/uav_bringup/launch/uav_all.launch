@@ -36,4 +36,7 @@
     <!-- <param name="use_sim_time" value="false" /> -->
     <include file="$(find task_manager)/launch/task_manager.launch" />
 
+    <!-- 子任务节点 -->
+    <include file="$(find subtask)/launch/subtask.launch" />
+
 </launch>

@@ -1,16 +1,16 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(task_manager)
+project(subtask)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   message_generation
-  remote_info
+  task_manager
 )
 
 add_message_files(
   FILES
-  OrderTask.msg
+  ControlData.msg
 )
 
 generate_messages(
@@ -25,6 +25,9 @@ catkin_package(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(task_manager_node src/task_manager_node.cpp)
-add_dependencies(task_manager_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
-target_link_libraries(task_manager_node ${catkin_LIBRARIES})
+add_executable(task_1_base_act src/task_1_base_act.cpp)
+add_dependencies(task_1_base_act
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(task_1_base_act ${catkin_LIBRARIES})

@@ -3,6 +3,7 @@
 #include <vector>
 #include "msp_interface/MspChannel.h"
 #include "remote_info/Remote.h"  // 需要添加对 remote_info 消息的依赖
+#include "subtask/ControlData.h"  // 新增
 
 namespace msp_interface
 {
@@ -22,6 +23,9 @@ public:
         // 订阅遥控器原始数据话题（/remote_order
         remote_sub_ = nh_.subscribe("remote_order", 10, &ModeControllerNode::remoteCallback, this);
 
+        // 订阅控制指令话题（/control_data）
+        control_sub_ = nh_.subscribe("/control_data", 10, &ModeControllerNode::controlCallback, this);
+        
         // 创建定时器
         double period = 1.0 / publish_rate_;
         timer_ = nh_.createTimer(ros::Duration(period), &ModeControllerNode::timerCallback, this);
@@ -35,6 +39,14 @@ private:
         std::lock_guard<std::mutex> lock(mutex_);
         last_remote_channels_ = msg->channels;  // 保存遥控器通道值
         ROS_DEBUG_THROTTLE(1.0, "Received remote data with %zu channels", last_remote_channels_.size());
+    }
+
+    void controlCallback(const subtask::ControlData::ConstPtr& msg)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_control_data_ = *msg;
+        use_control_data_ = true;  // 标记有新的控制数据
+        ROS_DEBUG_THROTTLE(1.0, "Received control data");
     }
 
     void timerCallback(const ros::TimerEvent&)
@@ -66,9 +78,12 @@ private:
     double publish_rate_;
     ros::Publisher channel_pub_;
     ros::Subscriber remote_sub_;
+    ros::Subscriber control_sub_;
     ros::Timer timer_;
 
     std::vector<uint16_t> last_remote_channels_;  // 保存最近接收到的遥控器通道
+    subtask::ControlData last_control_data_;
+    bool use_control_data_;
     std::mutex mutex_;
 };
 
