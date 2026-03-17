@@ -2,8 +2,8 @@
 #include <mutex>
 #include <vector>
 #include "msp_interface/MspChannel.h"
-#include "remote_info/Remote.h"  // 需要添加对 remote_info 消息的依赖
-#include "subtask/ControlData.h"  // 新增
+#include "remote_info/Remote.h"
+#include "subtask/ControlData.h"
 
 namespace msp_interface
 {
@@ -12,63 +12,121 @@ class ModeControllerNode
 {
 public:
     ModeControllerNode(ros::NodeHandle& nh, ros::NodeHandle& nh_priv)
-        : nh_(nh), nh_priv_(nh_priv)
+        : nh_(nh), nh_priv_(nh_priv), use_control_data_(false), use_remote_direct_(false)
     {
-        // 读取参数：发布频率，默认50Hz
+        // 读取参数
         nh_priv_.param<double>("publish_rate", publish_rate_, 50.0);
+        nh_priv_.param<int>("max_channels", max_channels_, 16);
+        nh_priv_.param<double>("remote_timeout", remote_timeout_, 0.1);   // 遥控器超时 (秒)
+        nh_priv_.param<double>("control_timeout", control_timeout_, 0.1); // 控制数据超时 (秒)
 
-        // 创建发布者（飞控通道）
-        channel_pub_ = nh_.advertise<msp_interface::MspChannel>("msp_channel", 10);
-
-        // 订阅遥控器原始数据话题（/remote_order
-        remote_sub_ = nh_.subscribe("remote_order", 10, &ModeControllerNode::remoteCallback, this);
-
-        // 订阅控制指令话题（/control_data）
-        control_sub_ = nh_.subscribe("/control_data", 10, &ModeControllerNode::controlCallback, this);
+        // 发布者和订阅者队列大小设为1，降低延迟
+        channel_pub_ = nh_.advertise<msp_interface::MspChannel>("msp_channel", 1);
+        remote_sub_ = nh_.subscribe("remote_order", 1, &ModeControllerNode::remoteCallback, this);
+        control_sub_ = nh_.subscribe("/control_data", 1, &ModeControllerNode::controlCallback, this);
         
-        // 创建定时器
+        // 定时器
         double period = 1.0 / publish_rate_;
         timer_ = nh_.createTimer(ros::Duration(period), &ModeControllerNode::timerCallback, this);
 
-        ROS_INFO("ModeControllerNode started, publishing at %.1f Hz", publish_rate_);
+        // 初始化最后接收时间（设为0表示从未收到）
+        last_remote_time_ = ros::Time(0);
+        last_control_time_ = ros::Time(0);
+
+        ROS_INFO("ModeControllerNode started, publishing at %.1f Hz, max_channels=%d", publish_rate_, max_channels_);
+        ROS_INFO("Timeouts: remote=%.2fs, control=%.2fs", remote_timeout_, control_timeout_);
     }
 
 private:
     void remoteCallback(const remote_info::Remote::ConstPtr& msg)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_remote_channels_ = msg->channels;  // 保存遥控器通道值
-        ROS_DEBUG_THROTTLE(1.0, "Received remote data with %zu channels", last_remote_channels_.size());
+        last_remote_channels_ = msg->channels;
+        last_remote_time_ = ros::Time::now();   // 更新最后接收时间
+
+        // 根据遥控器通道8（索引7）的值更新强制遥控器模式标志
+        if (last_remote_channels_.size() > 7) {
+            use_remote_direct_ = (last_remote_channels_[7] < 1350);
+            if (use_remote_direct_) {
+                use_control_data_ = false;  // 强制遥控器模式时，清除控制数据标志
+            }
+        } else {
+            use_remote_direct_ = false;
+        }
+        ROS_DEBUG_THROTTLE(1.0, "Received remote data with %zu channels, use_remote_direct=%d",
+                           last_remote_channels_.size(), use_remote_direct_);
     }
 
     void controlCallback(const subtask::ControlData::ConstPtr& msg)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        last_control_data_ = *msg;
-        use_control_data_ = true;  // 标记有新的控制数据
-        ROS_DEBUG_THROTTLE(1.0, "Received control data");
+        // 仅在非强制遥控器模式下才接受控制数据
+        if (!use_remote_direct_) {
+            last_control_data_ = *msg;
+            last_control_time_ = ros::Time::now();   // 更新最后接收时间
+            use_control_data_ = true;
+            ROS_DEBUG_THROTTLE(1.0, "Received control data");
+        } else {
+            ROS_DEBUG_THROTTLE(1.0, "Ignored control data (remote direct mode active)");
+        }
     }
 
     void timerCallback(const ros::TimerEvent&)
     {
         msp_interface::MspChannel cmd_msg;
+        ros::Time now = ros::Time::now();
+
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (last_remote_channels_.empty()) {
-                // 无遥控器数据时，发布默认安全值（8通道，油门最低）
-                cmd_msg.channels = {1500, 1500, 1000, 1500, 1500, 1500, 1500, 1500};
-            } else {
-                // 将遥控器通道映射到飞控通道（通常飞控只需前8个通道）
-                cmd_msg.channels.resize(8, 1500);
-                size_t copy_len = std::min(last_remote_channels_.size(), size_t(8));
-                for (size_t i = 0; i < copy_len; ++i) {
+
+            // 检查数据源有效性
+            bool remote_valid = (last_remote_time_ != ros::Time(0)) && 
+                                (now - last_remote_time_ < ros::Duration(remote_timeout_));
+            bool control_valid = (last_control_time_ != ros::Time(0)) && 
+                                 (now - last_control_time_ < ros::Duration(control_timeout_));
+
+            // 如果遥控器超时，强制遥控器模式标志应被忽略（数据已失效）
+            // 注意：use_remote_direct_ 仅在遥控器有效时才有意义
+            if (!remote_valid) {
+                use_remote_direct_ = false;   // 超时后不再强制遥控器
+            }
+
+            // 决策逻辑：优先级 强制遥控器(有效) > 控制数据(有效) > 普通遥控器(有效) > 默认安全值
+            if (remote_valid && use_remote_direct_) {
+                // 强制遥控器模式：直接使用遥控器数据
+                size_t channels_to_copy = std::min(last_remote_channels_.size(), static_cast<size_t>(max_channels_));
+                cmd_msg.channels.assign(max_channels_, 1500);
+                for (size_t i = 0; i < channels_to_copy; ++i) {
                     cmd_msg.channels[i] = last_remote_channels_[i];
                 }
-
-                // 可选：根据遥控器通道5切换模式（例如 >1500 为自动模式）
-                // 此处可根据需求修改某些通道值
+                ROS_DEBUG_THROTTLE(1.0, "Using remote direct mode (remote valid)");
+            }
+            else if (control_valid) {
+                // 控制数据模式：仅填充前4个通道
+                cmd_msg.channels.assign(max_channels_, 1500);
+                cmd_msg.channels[0] = static_cast<uint16_t>(last_control_data_.roll);
+                cmd_msg.channels[1] = static_cast<uint16_t>(last_control_data_.pitch);
+                cmd_msg.channels[2] = static_cast<uint16_t>(last_control_data_.throttle);
+                cmd_msg.channels[3] = static_cast<uint16_t>(last_control_data_.yaw);
+                ROS_DEBUG_THROTTLE(1.0, "Using control data (control valid)");
+            }
+            else if (remote_valid) {
+                // 普通遥控器模式（遥控器有效但非强制）
+                size_t channels_to_copy = std::min(last_remote_channels_.size(), static_cast<size_t>(max_channels_));
+                cmd_msg.channels.assign(max_channels_, 1500);
+                for (size_t i = 0; i < channels_to_copy; ++i) {
+                    cmd_msg.channels[i] = last_remote_channels_[i];
+                }
+                ROS_DEBUG_THROTTLE(1.0, "Using remote (default)");
+            }
+            else {
+                // 无任何有效数据，发布默认安全值
+                cmd_msg.channels.assign(max_channels_, 1500);
+                cmd_msg.channels[2] = 1000;  // 油门最低
+                ROS_DEBUG_THROTTLE(1.0, "Using default safe values (no valid data)");
             }
         }
+
         channel_pub_.publish(cmd_msg);
         ROS_DEBUG_THROTTLE(1.0, "Published channel data (%zu channels)", cmd_msg.channels.size());
     }
@@ -76,14 +134,20 @@ private:
     ros::NodeHandle nh_;
     ros::NodeHandle nh_priv_;
     double publish_rate_;
+    int max_channels_;
+    double remote_timeout_;    // 遥控器超时时间
+    double control_timeout_;   // 控制数据超时时间
     ros::Publisher channel_pub_;
     ros::Subscriber remote_sub_;
     ros::Subscriber control_sub_;
     ros::Timer timer_;
 
-    std::vector<uint16_t> last_remote_channels_;  // 保存最近接收到的遥控器通道
+    std::vector<uint16_t> last_remote_channels_;
     subtask::ControlData last_control_data_;
     bool use_control_data_;
+    bool use_remote_direct_;
+    ros::Time last_remote_time_;   // 最后一次收到遥控器数据的时间
+    ros::Time last_control_time_;  // 最后一次收到控制数据的时间
     std::mutex mutex_;
 };
 

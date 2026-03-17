@@ -30,7 +30,7 @@ public:
 
 
         // 2. 初始化发布者
-        remote_pub_ = nh_.advertise<remote_info::Remote>("remote_order", 10);
+        remote_pub_ = nh_.advertise<remote_info::Remote>("remote_order", 1);
 
         // 3. 创建串口驱动对象并打开串口
         serial_.reset(new SerialDriver());
