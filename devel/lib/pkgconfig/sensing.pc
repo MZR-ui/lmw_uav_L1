@@ -1,8 +1,0 @@
-prefix=/home/mzr/lmw_catkin_ws/uav_ws/devel
-
-Name: sensing
-Description: Description of sensing
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 

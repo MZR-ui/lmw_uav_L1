@@ -1,8 +1,0 @@
-prefix=/home/mzr/lmw_catkin_ws/uav_ws/devel
-
-Name: gimbal_control_serial
-Description: Description of gimbal_control_serial
-Version: 0.0.0
-Cflags: -I/home/mzr/lmw_catkin_ws/uav_ws/devel/include
-Libs: -L${prefix}/lib 
-Requires: roscpp std_msgs geometry_msgs serial message_runtime
