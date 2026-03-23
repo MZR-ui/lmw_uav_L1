@@ -1,5 +1,5 @@
 # 遥控器接收机串口配置
-port: "/dev/ttyUSB1"
+port: "/dev/ttyUSB0"
 baud: 115200
 # 可以将来添加其他参数，如通道数量、协议类型等
 

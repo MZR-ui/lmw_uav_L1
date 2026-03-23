@@ -1,6 +1,6 @@
 # 串口配置参数
 # port: "/dev/ttyACM0"   # 飞控连接的串口设备
-port: "/dev/ttyUSB0"   # 飞控连接的串口设备
+port: "/dev/ttyACM0"   # 飞控连接的串口设备
 baud: 115200           # 波特率，必须与飞控设置一致
 debug: true           # 调试模式开关（如需更详细日志可设为 true）
 

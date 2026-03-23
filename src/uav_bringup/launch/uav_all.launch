@@ -18,11 +18,12 @@
         -->
     </include>
 
-    <!-- 以下两个节点暂时屏蔽
+    <!-- 以下两个节点暂时屏蔽 -->
     <include file="$(find gimbal_control_serial)/launch/gimbal_control.launch">
-        <arg name="some_param" value="value" />
+        <rosparam command="load" file="$(find gimbal_control_serial)/config/serial.yaml" />
     </include>
-
+    
+    <!--
     <include file="$(find sensing)/launch/realsense.launch">
         <arg name="enable_pointcloud" value="false" />
     </include>

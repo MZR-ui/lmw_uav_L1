@@ -4,6 +4,7 @@
 #include "msp_interface/MspChannel.h"
 #include "remote_info/Remote.h"
 #include "subtask/ControlData.h"
+#include "gimbal_control_serial/GimbalCmd.h" 
 
 namespace msp_interface
 {
@@ -19,12 +20,14 @@ public:
         nh_priv_.param<int>("max_channels", max_channels_, 16);
         nh_priv_.param<double>("remote_timeout", remote_timeout_, 0.1);   // 遥控器超时 (秒)
         nh_priv_.param<double>("control_timeout", control_timeout_, 0.1); // 控制数据超时 (秒)
+        nh_priv_.param<double>("gimbal_angle_range", gimbal_angle_range_, 45.0);
 
         // 发布者和订阅者队列大小设为1，降低延迟
         channel_pub_ = nh_.advertise<msp_interface::MspChannel>("msp_channel", 1);
         remote_sub_ = nh_.subscribe("remote_order", 1, &ModeControllerNode::remoteCallback, this);
         control_sub_ = nh_.subscribe("/control_data", 1, &ModeControllerNode::controlCallback, this);
-        
+        gimbal_pub_ = nh_.advertise<gimbal_control_serial::GimbalCmd>("/gimbal/cmd", 1);
+
         // 定时器
         double period = 1.0 / publish_rate_;
         timer_ = nh_.createTimer(ros::Duration(period), &ModeControllerNode::timerCallback, this);
@@ -35,6 +38,7 @@ public:
 
         ROS_INFO("ModeControllerNode started, publishing at %.1f Hz, max_channels=%d", publish_rate_, max_channels_);
         ROS_INFO("Timeouts: remote=%.2fs, control=%.2fs", remote_timeout_, control_timeout_);
+        ROS_INFO("Gimbal angle range: +/- %.1f deg", gimbal_angle_range_);
     }
 
 private:
@@ -90,7 +94,8 @@ private:
             if (!remote_valid) {
                 use_remote_direct_ = false;   // 超时后不再强制遥控器
             }
-
+            
+            // ----- 发布飞控通道 -----
             // 决策逻辑：优先级 强制遥控器(有效) > 控制数据(有效) > 普通遥控器(有效) > 默认安全值
             if (remote_valid && use_remote_direct_) {
                 // 强制遥控器模式：直接使用遥控器数据
@@ -125,6 +130,26 @@ private:
                 cmd_msg.channels[2] = 1000;  // 油门最低
                 ROS_DEBUG_THROTTLE(1.0, "Using default safe values (no valid data)");
             }
+
+            // ----- 发布云台指令（仅在强制遥控器模式下） -----
+            if (remote_valid && use_remote_direct_ && last_remote_channels_.size() >= 10) {
+                // 通道9（索引8）→ roll, 通道10（索引9）→ yaw
+                uint16_t ch9 = last_remote_channels_[8];
+                uint16_t ch10 = last_remote_channels_[9];
+
+                // 将通道值 1000~2000 映射到 ±gimbal_angle_range_ 角度
+                float roll = (ch9 - 1500.0f) / 500.0f * gimbal_angle_range_;
+                float yaw   = (ch10 - 1500.0f) / 500.0f * gimbal_angle_range_;
+
+                gimbal_control_serial::GimbalCmd gimbal_msg;
+                gimbal_msg.roll  = roll;
+                gimbal_msg.pitch = 0.0f;
+                gimbal_msg.yaw   = yaw;
+                gimbal_msg.mode  = 0;   // 模式0（根据需要可配置）
+
+                gimbal_pub_.publish(gimbal_msg);
+                ROS_DEBUG_THROTTLE(1.0, "Published gimbal cmd: roll=%.1f, yaw=%.1f", roll, yaw);
+            }
         }
 
         channel_pub_.publish(cmd_msg);
@@ -149,6 +174,9 @@ private:
     ros::Time last_remote_time_;   // 最后一次收到遥控器数据的时间
     ros::Time last_control_time_;  // 最后一次收到控制数据的时间
     std::mutex mutex_;
+
+    ros::Publisher gimbal_pub_;                     // 云台指令发布者
+    double gimbal_angle_range_;                     // 云台角度范围（度）
 };
 
 } // namespace msp_interface
