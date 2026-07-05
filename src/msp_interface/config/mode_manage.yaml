@@ -1,0 +1,20 @@
+# mode_manage_node 参数配置
+
+# ===== 通道发送参数 =====
+publish_rate: 100.0          # 通道下发频率 (Hz)
+max_channels: 16             # 通道数
+remote_timeout: 0.1          # 遥控超时 (s)
+control_timeout: 0.1         # 控制数据超时 (s)
+gimbal_angle_range: 45.0     # 云台角度范围 (deg)
+
+# ===== Rosbag 录制参数 =====
+# 保存目录
+bag_save_dir: "/home/mzr/lmw_catkin_ws/uav_ws/data/rosbag"
+# 最多保留的 bag 文件数 (超过会从最旧开始删)
+max_bag_files: 100
+# 单个 bag 的最大录制时长 (秒)，默认 600s = 10min
+max_record_duration: 600.0
+# CH5 阈值 (PWM)；>= 阈值视为 HIGH，开始录；< 阈值视为 LOW，停止录
+ch5_threshold: 1350
+# 单个包到时长上限后，若 CH5 仍处于 HIGH，是否自动开新包继续录
+auto_restart_on_timeout: true

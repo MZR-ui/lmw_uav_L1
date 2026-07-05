@@ -8,7 +8,6 @@
 #include <mutex>
 #include "gimbal_control_serial/gimbal_protocol.hpp"
 #include <sys/ioctl.h>
-#include <functional>
 
 
 class GimbalSerial
@@ -28,13 +27,9 @@ public:
                           gimbal_protocol::Gbc2GcuPkt_t& rx_pkt,
                           int timeout_ms = 100);
 
-    using ReceiveCallback = std::function<void(const gimbal_protocol::Gbc2GcuPkt_t&)>;
-    void setReceiveCallback(ReceiveCallback cb);
+private:
 
 private:
-    void readLoop();
-    ReceiveCallback receive_cb_;
-
     boost::asio::io_service io_;
     boost::asio::serial_port serial_;
     //serial::Serial serial_;

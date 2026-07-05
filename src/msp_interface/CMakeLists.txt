@@ -9,22 +9,32 @@ find_package(catkin REQUIRED COMPONENTS
   dynamic_reconfigure
   geometry_msgs
   roscpp
+  rosbag
   sensor_msgs
+  geometry_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
   std_msgs
   message_generation
 )
+
+find_package(Boost REQUIRED COMPONENTS filesystem system)
 
 ## 生成自定义消息
 add_message_files(
   FILES
   MspSensor.msg
   MspChannel.msg
+  EscTelem.msg
+  Attitude.msg
 )
 
 ## 生成消息（依赖 std_msgs）
 generate_messages(
   DEPENDENCIES
   std_msgs
+  geometry_msgs
 )
 
 ## catkin 包配置
@@ -38,6 +48,7 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${Boost_INCLUDE_DIRS}
 )
 
 ## 声明可执行文件（节点）
@@ -68,6 +79,7 @@ add_dependencies(mode_manage_node
 
 target_link_libraries(mode_manage_node
   ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
 )
 
 ## 链接库

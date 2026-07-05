@@ -34,7 +34,7 @@ typedef struct
 
 #pragma pack(pop)
 
-// CRC16 函数声明
+// CRC16 function declaration
 uint16_t CalculateCrc16(uint8_t *ptr, uint8_t len);
 }
 

@@ -3,7 +3,6 @@
 #include "gimbal_control_serial/gimbal_serial.hpp"
 #include "gimbal_control_serial/gimbal_protocol.hpp"
 #include "gimbal_control_serial/GimbalCmd.h"
-#include "gimbal_control_serial/GimbalStatus.h"
 #include <vector>
 #include <mutex>
 
@@ -33,24 +32,6 @@ public:
         // 3. 初始化串口
         cmd_sub_ = nh_.subscribe("/gimbal/cmd", 10, &GimbalControlNode::cmdCallback, this);
         raw_tx_pub_ = nh_.advertise<std_msgs::UInt8MultiArray>("/gimbal/raw_tx", 10);
-        status_pub_ = nh_.advertise<gimbal_control_serial::GimbalStatus>("/gimbal/status", 10);
-
-        serial_->setReceiveCallback([this](const Gbc2GcuPkt_t& pkt) {
-            gimbal_control_serial::GimbalStatus msg;
-            msg.header.stamp = ros::Time::now();
-            msg.fw_ver = pkt.fw_ver;
-            msg.hw_err = pkt.hw_err;
-            msg.inv_flag = pkt.inv_flag;
-            msg.gbc_stat = pkt.gbc_stat;
-            msg.tca_flag = pkt.tca_flag;
-            for(int i=0; i<3; i++) {
-                msg.cam_rate[i] = pkt.cam_rate[i];
-                msg.cam_angle[i] = pkt.cam_angle[i];
-                msg.mtr_angle[i] = pkt.mtr_angle[i];
-            }
-            
-            status_pub_.publish(msg);
-        });
 
         // 4. 创建定时器
         timer_ = nh_.createTimer(ros::Duration(1.0/publish_rate_), &GimbalControlNode::timerCallback, this);
@@ -61,7 +42,6 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber cmd_sub_;
     ros::Publisher raw_tx_pub_;
-    ros::Publisher status_pub_;
     ros::Timer timer_;
     std::unique_ptr<GimbalSerial> serial_;   // 串口句柄
     //std::shared_ptr<GimbalSerial> serial_;   // ? 锟侥筹拷指串口句柄
@@ -126,9 +106,17 @@ private:
         pkt.crc[1] = crc & 0xFF;
         pkt.crc[0] = (crc >> 8) & 0xFF;
 
-        // 发送命令包，接收将由异步回调处理
-        if (!serial_->sendPacket(pkt)) {
-            // ROS_WARN_THROTTLE(1.0, "Failed to send packet to gimbal");
+
+        Gbc2GcuPkt_t recv_pkt;
+        bool ok = serial_->sendAndWaitReply(pkt, recv_pkt, 5);  // 5ms 超时
+
+        if (ok) {
+            // ROS_INFO("?? Recv OK: cam_angle = %.2f %.2f %.2f",
+            //          recv_pkt.cam_angle[0] * 0.01,
+            //          recv_pkt.cam_angle[1] * 0.01,
+            //          recv_pkt.cam_angle[2] * 0.01);
+        } else {
+            ROS_WARN("?? No response from gimbal");
         }
 
         std_msgs::UInt8MultiArray raw_msg;

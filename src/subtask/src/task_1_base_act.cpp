@@ -13,7 +13,7 @@ public:
         : nh_(nh), nh_priv_(nh_priv), current_task_id_(0)
     {
         // 读取参数：发布频率，默认50Hz
-        nh_priv_.param<double>("publish_rate", publish_rate_, 50.0);
+        nh_priv_.param<double>("publish_rate", publish_rate_, 100.0);
         // 读取任务对应的指令参数（可选，也可硬编码）
         nh_priv_.param<float>("throttle_idle", throttle_idle_, 1000.0f);
         nh_priv_.param<float>("throttle_auto", throttle_auto_, 1500.0f);
@@ -54,9 +54,9 @@ private:
         {
         case 0:  // 空闲/安全模式
             cmd.throttle = throttle_idle_;
-            cmd.pitch = 0.0f;
-            cmd.roll = 0.0f;
-            cmd.yaw = 0.0f;
+            cmd.pitch = 1000.0f;
+            cmd.roll = 1000.0f;
+            cmd.yaw = 1000.0f;
             cmd.mode_gim = 0;       // 跟随
             cmd.pitch_gim = 0.0f;
             cmd.roll_gim = 0.0f;
@@ -64,9 +64,9 @@ private:
             break;
         case 1:  // 任务1: 起飞/悬停
             cmd.throttle = throttle_auto_;
-            cmd.pitch = 0.0f;
-            cmd.roll = 0.0f;
-            cmd.yaw = 0.0f;
+            cmd.pitch = 1000.0f;
+            cmd.roll = 1000.0f;
+            cmd.yaw = 1000.0f;
             cmd.mode_gim = 1;       // 锁定
             cmd.pitch_gim = -30.0f;  // 云台向下30度
             cmd.roll_gim = 0.0f;
@@ -74,9 +74,9 @@ private:
             break;
         case 2:  // 任务2: 前进/扫描
             cmd.throttle = throttle_auto_;
-            cmd.pitch = 5.0f;        // 俯仰5度前进
-            cmd.roll = 0.0f;
-            cmd.yaw = 0.0f;
+            cmd.pitch = 1000.0f;        // 俯仰5度前进
+            cmd.roll = 1000.0f;
+            cmd.yaw = 1000.0f;
             cmd.mode_gim = 0;        // 跟随
             cmd.pitch_gim = -45.0f;
             cmd.roll_gim = 0.0f;
@@ -84,9 +84,9 @@ private:
             break;
         default:
             cmd.throttle = throttle_idle_;
-            cmd.pitch = 0.0f;
-            cmd.roll = 0.0f;
-            cmd.yaw = 0.0f;
+            cmd.pitch = 1000.0f;
+            cmd.roll = 1000.0f;
+            cmd.yaw = 1000.0f;
             cmd.mode_gim = 0;
             cmd.pitch_gim = 0.0f;
             cmd.roll_gim = 0.0f;

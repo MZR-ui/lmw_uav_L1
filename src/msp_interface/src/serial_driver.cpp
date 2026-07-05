@@ -90,6 +90,7 @@ bool SerialDriver::open(const std::string& port, int baud_rate)
         case 57600:  speed = B57600; break;
         case 115200: speed = B115200; break;
         case 230400: speed = B230400; break;
+        case 460800: speed = B460800; break;
         default:
             std::cerr << "Unsupported baud rate: " << baud_rate << ", using 115200" << std::endl;
             speed = B115200;

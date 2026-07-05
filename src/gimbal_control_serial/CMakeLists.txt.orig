@@ -19,7 +19,6 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   GimbalCmd.msg
-  GimbalStatus.msg
 )
 
 ## Generate added messages and services

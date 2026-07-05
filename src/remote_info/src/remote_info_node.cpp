@@ -7,6 +7,7 @@
 
 // 自定义消息
 #include "remote_info/Remote.h"
+#include "msp_interface/MspChannel.h"
 
 // 串口驱动和协议解析头文件
 #include "remote_info/serial_driver.h"
@@ -31,6 +32,8 @@ public:
 
         // 2. 初始化发布者
         remote_pub_ = nh_.advertise<remote_info::Remote>("remote_order", 1);
+
+        channel_sub_ = nh_.subscribe("/msp_channel", 10, &RemoteInfoNode::channelCallback, this);
 
         // 3. 创建串口驱动对象并打开串口
         serial_.reset(new SerialDriver());
@@ -66,6 +69,58 @@ public:
     }
 
 private:
+
+    /**
+     * @brief 订阅话题 /msp_channel 的回调，将控制数据发送给飞控
+     */
+    void channelCallback(const msp_interface::MspChannel::ConstPtr& msg)
+    {
+        sendChannels(msg->channels);
+    }
+
+    /**
+     * @brief 将通道数据打包并通过串口发送给飞控 (使用IBUS协议)
+     * @param channels 通道值数组
+     */
+    void sendChannels(const std::vector<uint16_t>& channels)
+    {
+        // 1. Initialize a 32-byte frame with zeros
+        std::vector<uint8_t> ibus_frame(32, 0);
+
+        // 2. Set the Length and Command headers
+        ibus_frame[0] = 0x20;
+        ibus_frame[1] = 0x40;
+
+        // 3. Pack up to 14 channels (Little-Endian)
+        for (size_t i = 0; i < 14; ++i)
+        {
+            // If the incoming /msp_channel has fewer than 14 channels, default to 1500
+            uint16_t ch = (i < channels.size()) ? channels[i] : 1500;
+
+            ibus_frame[2 + i * 2] = ch & 0xFF;           // Low byte
+            ibus_frame[3 + i * 2] = (ch >> 8) & 0xFF;    // High byte
+        }
+
+        // 4. Calculate the Checksum
+        uint16_t sum = 0;
+        for (int i = 0; i < 30; ++i)
+        {
+            sum += ibus_frame[i];
+        }
+        uint16_t checksum = 0xFFFF - sum;
+
+        // 5. Append the Checksum (Little-Endian)
+        ibus_frame[30] = checksum & 0xFF;
+        ibus_frame[31] = (checksum >> 8) & 0xFF;
+
+        // 6. Send over Serial
+        std::lock_guard<std::mutex> lock(serial_write_mutex_);
+        if (!serial_->write(ibus_frame.data(), ibus_frame.size()))
+        {
+            ROS_ERROR("Failed to send IBUS channel data");
+        }
+    }
+
     void onSerialData(const uint8_t* data, size_t len)
     {
         // 可选：打印原始数据用于调试
@@ -92,27 +147,9 @@ private:
     // 添加回调函数：
     void sendTimerCallback(const ros::TimerEvent&)
     {
-        // 构造一个测试用的 IBUS 数据帧（14通道全1500）
-        // ROS_INFO("Timer callback triggered at %.3f", ros::Time::now().toSec());  // 每触发一次都打印
-        std::vector<uint8_t> test_frame = {
-            0x20, 0x40,
-            0xDC, 0x05, 0xDC, 0x05,                           // CH13-14
-            0x00, 0x00  // 校验和占位，需要计算
-        };
-        // 计算校验和（前30字节和，0xFFFF - sum）
-        uint16_t sum = 0;
-        for (int i = 0; i < 30; i++) sum += test_frame[i];
-        uint16_t checksum = 0xFFFF - sum;
-        test_frame[6] = checksum & 0xFF;
-        test_frame[7] = (checksum >> 8) & 0xFF;
-
-        // printf("Sending frame (%zu bytes): ", test_frame.size());
-        // for (auto b : test_frame) printf("%02x ", b);
-        // printf("\n");
-
-        if (!serial_->write(test_frame.data(), test_frame.size())) {
-            ROS_ERROR("Failed to send test frame");
-        } 
+        // Construct a test frame containing 14 channels (default to 1500)
+        std::vector<uint16_t> test_channels(14, 1500);
+        sendChannels(test_channels);
     }
 
 
@@ -128,8 +165,10 @@ private:
 
     IbusParser parser_;
     std::mutex parser_mutex_;
+    std::mutex serial_write_mutex_;
 
     ros::Publisher remote_pub_;
+    ros::Subscriber channel_sub_;
     
     ros::Timer send_timer_;
     double send_rate_;
